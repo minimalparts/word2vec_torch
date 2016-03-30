@@ -54,4 +54,6 @@ for k = 1, config.epochs do
     m.lr = config.lr -- reset learning rate at each epoch
     m:train_model(config.corpus)
 end
-m:print_sim_words({"the","he","can"},5)
+
+m:print_semantic_space()
+--m:print_sim_words({"the","he","can","good","Jack"},5)

@@ -4,6 +4,7 @@ Class for word2vec with skipgram and negative sampling
 
 require("sys")
 require("nn")
+require 'util.backgroundSpace'
 
 local Word2Vec = torch.class("Word2Vec")
 
@@ -41,6 +42,22 @@ function Word2Vec:cuda()
     self.w2v:cuda()
 end
 
+function Word2Vec:initialise_model()
+    -- initialize word/context embeddings now that vocab size is known
+    --self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
+    --self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
+    self.word_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
+    self.context_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
+    --self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
+    self.w2v = nn.Sequential()
+    self.w2v:add(nn.ParallelTable())
+    self.w2v.modules[1]:add(self.context_vecs)
+    self.w2v.modules[1]:add(self.word_vecs)
+    self.w2v:add(nn.MM(false, true)) -- dot prod and sigmoid to get probabilities
+    self.w2v:add(nn.Sigmoid())
+    self.decay = (self.min_lr-self.lr)/(self.total_count*self.window)
+end 
+
 -- Build vocab frequency, word2index, and index2word from input file
 function Word2Vec:build_vocab(corpus)
     print("Building vocabulary...")
@@ -55,6 +72,7 @@ function Word2Vec:build_vocab(corpus)
             else
 	        self.vocab[word] = self.vocab[word] + 1
 	    end
+	    --print(word,self.vocab[word])
         end
         n = n + 1
     end
@@ -71,18 +89,9 @@ function Word2Vec:build_vocab(corpus)
     self.vocab_size = #self.index2word
     print(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
     print(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
-    -- initialize word/context embeddings now that vocab size is known
-    self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
-    self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
-    self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
-    self.w2v = nn.Sequential()
-    self.w2v:add(nn.ParallelTable())
-    self.w2v.modules[1]:add(self.context_vecs)
-    self.w2v.modules[1]:add(self.word_vecs)
-    self.w2v:add(nn.MM(false, true)) -- dot prod and sigmoid to get probabilities
-    self.w2v:add(nn.Sigmoid())
-    self.decay = (self.min_lr-self.lr)/(self.total_count*self.window)
+    self:initialise_model()
 end
+
 
 -- Build a table of unigram frequencies from which to obtain negative samples
 function Word2Vec:build_table()
@@ -91,7 +100,7 @@ function Word2Vec:build_table()
     print("Building a table of unigram frequencies... ")
     for _, count in pairs(self.vocab) do
     	total_count_pow = total_count_pow + count^self.alpha
-    end   
+    end  
     self.table = torch.IntTensor(self.table_size)
     local word_index = 1
     local word_prob = self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
@@ -99,7 +108,10 @@ function Word2Vec:build_table()
         self.table[idx] = word_index
         if idx / self.table_size > word_prob then
             word_index = word_index + 1
-	    word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
+	    if self.vocab[self.index2word[word_index]] ~= nil then --word is in vocab (AH fix)
+	        word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
+	    --print(self.index2word[word_index],self.vocab[self.index2word[word_index]],word_prob)
+	    end
         end
         if word_index > self.vocab_size then
             word_index = word_index - 1
@@ -207,6 +219,27 @@ function Word2Vec:print_sim_words(words, k)
 	        print(string.format("%s, %.4f", r[j][1], r[j][2]))
 	    end
 	end
+    end
+end
+
+local dump = function(vec)
+    vec = vec:view(vec:nElement())
+    local t = {}
+    for i=1,vec:nElement() do
+        t[#t+1] = string.format('%.4f', vec[i])
+    end
+    return table.concat(t, '\t')
+end
+
+function Word2Vec:print_semantic_space()
+    if self.word_vecs_norm == nil then
+        self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
+    end
+    for word,_ in pairs(self.vocab) do
+	vec=self.word_vecs_norm[self.word2index[word]]
+	vec:resize(vec:size(1),1)				--can only transpose vector with dim 2, so resize
+	vec=vec:t()
+	io.write(word,"\t",dump(vec),"\n")
     end
 end
 
