@@ -1,4 +1,4 @@
-This code is a modification of Yoon Kim's torch implementation of Word2Vec. The main change is the addition of a function to load an existing semantic space.
+This code is a modification of Yoon Kim's torch implementation of Word2Vec. The main changes are a)  the addition of a function to load an existing semantic space; b) a function to print out the new output semantic space.
 
 ### Original README ###
 
