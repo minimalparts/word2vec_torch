@@ -1,3 +1,5 @@
+-- Code borrowed and modified from https://github.com/larspars/word-rnn/blob/master/util/GloVeEmbedding.lua
+
 function split(inputstr, sep)
     if sep == nil then
         sep = "%s"
