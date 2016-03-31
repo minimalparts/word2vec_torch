@@ -44,11 +44,11 @@ end
 
 function Word2Vec:initialise_model()
     -- initialize word/context embeddings now that vocab size is known
-    --self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
-    --self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
+    -- self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
+    -- self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
     self.word_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
     self.context_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
-    --self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
+    -- self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
     self.w2v = nn.Sequential()
     self.w2v:add(nn.ParallelTable())
     self.w2v.modules[1]:add(self.context_vecs)
@@ -67,16 +67,28 @@ function Word2Vec:build_vocab(corpus)
     for line in f:lines() do
         for _, word in ipairs(self:split(line)) do
 	    self.total_count = self.total_count + 1
-	    if self.vocab[word] == nil then
-	        self.vocab[word] = 1	 
+	    if self.vocab[word:lower()] == nil then
+	        self.vocab[word:lower()] = 1	 
             else
-	        self.vocab[word] = self.vocab[word] + 1
+	        self.vocab[word:lower()] = self.vocab[word:lower()] + 1
 	    end
 	    --print(word,self.vocab[word])
         end
         n = n + 1
     end
     f:close()
+    
+    -- Add vocab from the background space
+    for line in io.lines("util/space.txt") do
+        local parts = split(line, " ")
+        local word = parts[1]
+	if self.vocab[word:lower()] == nil then
+	    self.vocab[word:lower()] = 1	 
+        else
+	    self.vocab[word:lower()] = self.vocab[word:lower()] + 1
+	end
+    end
+
     -- Delete words that do not meet the minfreq threshold and create word indices
     for word, count in pairs(self.vocab) do
     	if count >= self.minfreq then
@@ -86,6 +98,8 @@ function Word2Vec:build_vocab(corpus)
 	    self.vocab[word] = nil
         end
     end
+
+
     self.vocab_size = #self.index2word
     print(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
     print(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
@@ -93,7 +107,7 @@ function Word2Vec:build_vocab(corpus)
 end
 
 
--- Build a table of unigram frequencies from which to obtain negative samples
+-- Build a table of unigram frequencies from which to obtain negative samples (from current corpus, not background!!)
 function Word2Vec:build_table()
     local start = sys.clock()
     local total_count_pow = 0
@@ -153,6 +167,7 @@ function Word2Vec:train_stream(corpus)
     for line in f:lines() do
         sentence = self:split(line)
         for i, word in ipairs(sentence) do
+	    word=word:lower()
 	    word_idx = self.word2index[word]
 	    if word_idx ~= nil then -- word exists in vocab
     	        local reduced_window = torch.random(self.window) -- pick random window size
@@ -266,6 +281,7 @@ function Word2Vec:preload_data(corpus)
     for line in f:lines() do
         sentence = self:split(line)
         for i, word in ipairs(sentence) do
+	    word=word:lower()
 	    word_idx = self.word2index[word]
 	    if word_idx ~= nil then -- word exists in vocab
     	        local reduced_window = torch.random(self.window) -- pick random window size

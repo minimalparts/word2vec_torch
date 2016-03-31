@@ -1,4 +1,5 @@
 -- Code borrowed and modified from https://github.com/larspars/word-rnn/blob/master/util/GloVeEmbedding.lua
+-- IMPORTANT: background space must be space (not tab)-delimited
 
 function split(inputstr, sep)
     if sep == nil then
@@ -34,7 +35,6 @@ function backgroundSpace:__init(word2idx, embedding_size)
     --    w = torch.mm(w, torch.rand(file_embedding_size, embedding_size))
     --end
     self.weight = w:contiguous()
-    print(self.weight[1][1])
     torch.save(self.vocab_embedding_file, self.weight)
     print("loaded space")
 end
@@ -44,7 +44,9 @@ function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size,
     local loaded = {}
     print(self.vocab_size,file_embedding_size)
     local weight = torch.Tensor(self.vocab_size, file_embedding_size)
+    --print(numkeys(word2idx))
     for word, idx in pairs(word2idx) do
+	-- print(word,idx)
         --word_lower2idx[word:lower()] = idx
         word_lower2idx[word] = idx
     end
