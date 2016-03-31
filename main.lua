@@ -11,6 +11,7 @@ dofile("word2vec.lua")
 -- Default configuration
 config = {}
 config.corpus = "corpus.txt" -- input data
+config.background = "background.txt" -- background space
 config.window = 5 -- (maximum) window size
 config.dim = 100 -- dimensionality of word embeddings
 config.alpha = 0.75 -- smooth out unigram frequencies
@@ -26,6 +27,7 @@ config.stream = 1 -- 1 = stream from hard drive 0 = copy to memory first
 -- Parse input arguments
 cmd = torch.CmdLine()
 cmd:option("-corpus", config.corpus)
+cmd:option("-background", config.background)
 cmd:option("-window", config.window)
 cmd:option("-minfreq", config.minfreq)
 cmd:option("-dim", config.dim)
@@ -47,7 +49,7 @@ for i,j in pairs(config) do
 end
 -- Train model
 m = Word2Vec(config)
-m:build_vocab(config.corpus)
+m:build_vocab(config.corpus,config.background)
 m:build_table()
 
 for k = 1, config.epochs do

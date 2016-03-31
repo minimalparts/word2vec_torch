@@ -21,15 +21,15 @@ end
 
 local backgroundSpace, parent = torch.class('backgroundSpace', 'nn.LookupTable')
 
-function backgroundSpace:__init(word2idx, embedding_size)
-    local embedding_file = 'util/space.txt' 
+function backgroundSpace:__init(word2idx, embedding_size, background)
+    local embedding_file = background 
     local file_embedding_size = embedding_size
     self.vocab_size = numkeys(word2idx)
     self.word2idx = word2idx
     parent.__init(self, self.vocab_size, embedding_size)		--the lookup table?
     print("loading existing space")
     self.embedding_size = embedding_size
-    self.vocab_embedding_file = "util/space.t7"
+    self.vocab_embedding_file = background..".t7"
     w = self:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx)
     --if file_embedding_size ~= embedding_size then
     --    w = torch.mm(w, torch.rand(file_embedding_size, embedding_size))

@@ -42,12 +42,12 @@ function Word2Vec:cuda()
     self.w2v:cuda()
 end
 
-function Word2Vec:initialise_model()
+function Word2Vec:initialise_model(background)
     -- initialize word/context embeddings now that vocab size is known
     -- self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
     -- self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
-    self.word_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
-    self.context_vecs = backgroundSpace(self.word2index, self.dim) -- word embeddings from background
+    self.word_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
+    self.context_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
     -- self.word_vecs:reset(0.25); self.context_vecs:reset(0.25) -- rescale N(0,1)
     self.w2v = nn.Sequential()
     self.w2v:add(nn.ParallelTable())
@@ -59,7 +59,7 @@ function Word2Vec:initialise_model()
 end 
 
 -- Build vocab frequency, word2index, and index2word from input file
-function Word2Vec:build_vocab(corpus)
+function Word2Vec:build_vocab(corpus,background)
     print("Building vocabulary...")
     local start = sys.clock()
     local f = io.open(corpus, "r")
@@ -79,7 +79,7 @@ function Word2Vec:build_vocab(corpus)
     f:close()
     
     -- Add vocab from the background space
-    for line in io.lines("util/space.txt") do
+    for line in io.lines(background) do
         local parts = split(line, " ")
         local word = parts[1]
 	if self.vocab[word:lower()] == nil then
@@ -103,7 +103,7 @@ function Word2Vec:build_vocab(corpus)
     self.vocab_size = #self.index2word
     print(string.format("%d words and %d sentences processed in %.2f seconds.", self.total_count, n, sys.clock() - start))
     print(string.format("Vocab size after eliminating words occuring less than %d times: %d", self.minfreq, self.vocab_size))
-    self:initialise_model()
+    self:initialise_model(background)
 end
 
 
