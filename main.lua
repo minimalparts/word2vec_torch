@@ -11,10 +11,11 @@ dofile("word2vec.lua")
 -- Default configuration
 config = {}
 config.corpus = "corpus.txt" -- input data
-config.background = "background.txt" -- background space
+config.background = "none" -- background space
 config.window = 5 -- (maximum) window size
 config.dim = 100 -- dimensionality of word embeddings
-config.alpha = 0.75 -- smooth out unigram frequencies
+--config.alpha = 0.75 -- smooth out unigram frequencies
+config.alpha = 1 -- smooth out unigram frequencies
 config.table_size = 1e8 -- table size from which to sample neg samples
 config.neg_samples = 5 -- number of negative samples for each positive sample
 config.minfreq = 10 --threshold for vocab frequency
