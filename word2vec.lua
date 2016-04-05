@@ -291,7 +291,7 @@ function Word2Vec:preload_data(corpus)
 	    subsampl=torch.sqrt(1/freq)									-- subsampling formula
 	    keep=torch.bernoulli(subsampl)								-- so do we want to keep this word? get a random yes/no biased by subsampling factor
 	    --print(word,freq,subsampl,keep)
-	    if word_idx ~= nil then -- word exists in vocab						-- check the word is in the vocabulary...
+	    if word_idx ~= nil and keep == 1 then -- word exists in vocab						-- check the word is in the vocabulary...
     	        -- local reduced_window = torch.random(self.window) -- pick random window size
 		self.word[1] = word_idx -- update current word						-- this is confusing... self.word is not word... should be called 'target'
                 --for j = i - reduced_window, i + reduced_window do -- loop through contexts
@@ -319,6 +319,8 @@ function Word2Vec:preload_data(corpus)
 	end
     end
     print(string.format("%d word-contexts processed in %.2f seconds", c, sys.clock() - start))
+    --local loader = MinibatchLoader.create(self.train_words, self.vocab, seq_length, split_sizes)
+    -- local loader = MinibatchLoader.create(self.train_words, self.vocab, 50,50)
 end
 
 -- train from memory. this is needed to speed up GPU training
