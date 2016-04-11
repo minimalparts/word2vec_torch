@@ -118,18 +118,29 @@ end
 
 
 -- Build a table of unigram probabilities from which to obtain negative samples (from current corpus, not background!!)
+
+-- Build a table of unigram frequencies from which to obtain negative samples
 function Word2Vec:build_table_current()
     local start = sys.clock()
-    local total_count = 0
+    local total_count_pow = 0
     print("Building a table of unigram probabilities... ")
     for _, count in pairs(self.vocab) do
-    	total_count = total_count + count^self.alpha
-    end  
-    for idx = 1, self.vocab_size do
-        word_prob = self.vocab[self.index2word[idx]]^self.alpha / total_count			-- computing word probability
-        self.index2prob[idx] = word_prob	-- assign probability to idx		
-	--self.index2prob[idx] = self.vocab[self.index2word[idx]]^self.alpha					-- just keeping frequencies here
-	--print(self.index2word[idx],self.vocab[self.index2word[idx]],total_count,word_prob)
+    	total_count_pow = total_count_pow + count^self.alpha
+    end   
+    self.table = torch.IntTensor(self.table_size)
+    local word_index = 1
+    local word_prob = self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
+    for idx = 1, self.table_size do
+        self.table[idx] = word_index									--We repeat words as many times as it takes to have more frequent words more likely to sample
+        if idx / self.table_size > word_prob then
+            word_index = word_index + 1
+            if self.vocab[self.index2word[word_index]] ~= nil then --word is in vocab (AH fix)
+	    	word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow
+	    end
+        end
+        if word_index > self.vocab_size then
+            word_index = word_index - 1
+        end
     end
     print(string.format("Done in %.2f seconds.", sys.clock() - start))
 end
@@ -153,16 +164,15 @@ function Word2Vec:train_pair(word, contexts)
     --print(string.format("Trained pair in %.2f seconds.", sys.clock() - start))
 end
 
+
 -- Sample negative contexts
-function Word2Vec:sample_contexts(context_idx)
-    self.contexts[1] = context_idx
+function Word2Vec:sample_contexts(context)
+    self.contexts[1] = context
     local i = 0
     while i < self.neg_samples do
-	random_context_idx=torch.random(self.vocab_size)
-        -- neg_context_word = self.index2word[random_context_idx]
-	-- print("Sampling neg contexts for",random_context_idx,neg_context_word)
-	if context_idx ~= random_context_idx then
-	    self.contexts[i+2] = random_context_idx
+        neg_context = self.table[torch.random(self.table_size)]
+	if context ~= neg_context then
+	    self.contexts[i+2] = neg_context
 	    i = i + 1
 	end
     end
@@ -191,56 +201,43 @@ function Word2Vec:preload_data(corpus)
     self.train_words = {}; self.train_contexts = {}
     for line in f:lines() do										-- loop through each line in corpus
         sentence = self:split(line)									-- split line into words
+	local subsampled_line= ""
         for i, word in ipairs(sentence) do								-- for each word...
 	    word=word:lower()										-- convert to lower case...
 	    word_idx = self.word2index[word]								-- get the index of the word...
-	    freq=self.index2prob[word_idx]								-- get frequency of the word in the corpus...
+	    freq=self.vocab[self.index2word[word_idx]]								-- get frequency of the word in the corpus...
 	    if freq ~= nil then
-		    subsampl=(10^-4/freq)+torch.sqrt(10^-4/freq)									-- subsampling formula
-		    subsampl=torch.sqrt(10^-4/freq)									-- subsampling formula
-		    if subsampl < 1
-		    then
-		    	keep=torch.bernoulli(subsampl)								-- so do we want to keep this word? get a random yes/no biased by subsampling factor
-		    else
-		    	keep=1
+		    subsampl=(torch.sqrt(freq/(10^-4*self.total_count))+1)*(10^-4*self.total_count)/freq									-- subsampling formula
+		    --print("WORD SUB",word,freq,subsampl,keep)
+		    if subsampl > 0.2 then
+			subsampled_line = subsampled_line..word
+			subsampled_line = subsampled_line.." "
 		    end
 	    end
-	    if word_idx ~= nil and keep == 1 then -- word exists in vocab						-- check the word is in the vocabulary...
-	    --if word_idx ~= nil then -- word exists in vocab						-- check the word is in the vocabulary...
-    	        -- local reduced_window = torch.random(self.window) -- pick random window size
+        end
+	--print(subsampled_line)
+	sentence = self:split(subsampled_line)
+    	local reduced_window = torch.random(self.window) -- pick random window size
+	for i,word in ipairs(sentence) do
+		word_idx = self.word2index[word]								-- get the index of the word...
 		self.word[1] = word_idx -- update current word						-- this is confusing... self.word is not word... should be called 'target'
-                --for j = i - reduced_window, i + reduced_window do -- loop through contexts
-                for j = i - self.window, i + self.window do -- loop through contexts			-- for each context in the window around the target
-	            local context = sentence[j]								-- grab surface form of this context
-		    if context ~= nil and j ~= i then -- possible context				-- if the context is not nil, and not the target word
-		        context_idx = self.word2index[context]						-- get the context's id
-		        context_freq=self.index2prob[context_idx]								-- get frequency of the word in the corpus...
-			if context_freq ~= nil then
-				--context_subsampl=(10^-4/context_freq)+torch.sqrt(10^-4/context_freq)									-- subsampling formula
-				context_subsampl=torch.sqrt(10^-4/context_freq)									-- subsampling formula
-			        if context_subsampl < 1
-			        then
-				    context_keep=torch.bernoulli(context_subsampl)								-- so do we want to keep this word? get a random yes/no biased by subsampling factor
-			        else
-				    context_keep=1								-- so do we want to keep this word? get a random yes/no biased by subsampling factor
-			        end
-			end
-			if context_idx ~= nil and context_keep == 1 then -- valid context					-- check id is not nil
-			    --print("WORD SUB",word,freq,subsampl,keep)
-			    --print("CONTEXT SUB",context,context_freq,context_subsampl,context_keep)
-			    c = c + 1									-- increment overall word-context count
-  		            self:sample_contexts(context_idx) -- update pos/neg contexts		-- get negative contexts (this has the effect of filling self.contexts with neg context ids)
-			    if self.gpu==1 then
-			        self.train_words[c] = self.word:clone():cuda()				-- add ids to overall training data
-			        self.train_contexts[c] = self.contexts:clone():cuda()
-			    else
-				self.train_words[c] = self.word:clone()
-				self.train_contexts[c] = self.contexts:clone()
-			    end
-			end
-		    end
-	       end	      
-	    end
+		for j = i - reduced_window, i + reduced_window do -- loop through contexts
+			local context = sentence[j]								-- grab surface form of this context
+			if context ~= nil and j ~= i then -- possible context				-- if the context is not nil, and not the target word
+				context_idx = self.word2index[context]						-- get the context's id
+				if context_idx ~= nil then -- valid context					-- check id is not nil
+				    c = c + 1									-- increment overall word-context count
+				    self:sample_contexts(context_idx) -- update pos/neg contexts		-- get negative contexts (this has the effect of filling self.contexts with neg context ids)
+				    if self.gpu==1 then
+					self.train_words[c] = self.word:clone():cuda()				-- add ids to overall training data
+					self.train_contexts[c] = self.contexts:clone():cuda()
+				    else
+					self.train_words[c] = self.word:clone()
+					self.train_contexts[c] = self.contexts:clone()
+				    end
+				end
+		       end	      
+		end
 	end
     end
     print(string.format("%d word-contexts processed in %.2f seconds", c, sys.clock() - start))
