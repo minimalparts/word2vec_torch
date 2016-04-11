@@ -39,14 +39,20 @@ function backgroundSpace:__init(word2idx, embedding_size, background)
     print("loaded space")
 end
 
-function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx)
+function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx, gpu)
     local word_lower2idx = {}
     local loaded = {}
+    local weight = torch.Tensor()
     print(self.vocab_size,file_embedding_size)
-    local weight = torch.Tensor(self.vocab_size, file_embedding_size)
+    if gpu == 1 then
+        weight = torch.CudaTensor(self.vocab_size, file_embedding_size)
+    else
+        weight = torch.Tensor(self.vocab_size, file_embedding_size)
+    end
+    -- print(weight)
     --print(numkeys(word2idx))
     for word, idx in pairs(word2idx) do
-	-- print(word,idx)
+	--print(word,idx)
         --word_lower2idx[word:lower()] = idx
         word_lower2idx[word] = idx
     end
@@ -56,6 +62,7 @@ function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size,
         local word = parts[1]
         if word_lower2idx[word] then
             local idx = word_lower2idx[word]
+            --print(word,idx)
             for i=2, #parts do
                 weight[idx][i-1] = tonumber(parts[i])
             end
@@ -64,7 +71,7 @@ function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size,
     end
     for word, idx in pairs(word2idx) do
         if not loaded[word] then
-            print("Not loaded: " .. word)
+            --print("Not loaded: " .. word)
             for i=1, file_embedding_size do
                 weight[idx][i] = torch.normal(0, 0.9) --better way to do this?
             end
