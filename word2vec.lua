@@ -16,6 +16,7 @@ function Word2Vec:__init(config)
     self.minfreq = config.minfreq
     self.dim = config.dim
     self.criterion = nn.BCECriterion() -- logistic loss
+    --self.criterion = nn.MSECriterion()
     self.word = torch.IntTensor(1) 
     self.contexts = torch.IntTensor(1+self.neg_samples) 
     self.labels = torch.zeros(1+self.neg_samples); self.labels[1] = 1 -- first label is always pos sample
@@ -33,6 +34,7 @@ function Word2Vec:__init(config)
     self.batch_size = config.batch_size
     self.loss_toprint = 0.0
     self.subsampl = config.subsampl
+    self.epochs = config.epochs
 end
 
 
@@ -41,6 +43,7 @@ end
 ------------------------------------------------
 
 function Word2Vec:initialise_model(background)
+    self.original_lr = self.lr
     if background=="none" then
         -- initialize word/context embeddings now that vocab size is known
         self.word_vecs = nn.LookupTable(self.vocab_size, self.dim, self.gpu) -- word embeddings
@@ -149,7 +152,7 @@ function Word2Vec:build_table_current()
         self.table[idx] = word_index								-- we repeat words as many times as it takes to have more frequent words more likely to sample
         if idx / self.table_size > word_prob then						-- If the position in the table (as a ratio of the table_size) is greater than the prob of current word...
             word_index = word_index + 1								-- it's time to switch to the next word
-            if self.vocab[self.index2word[word_index]] ~= nil then --word is in vocab (AH fix)
+            if self.vocab[self.index2word[word_index]] ~= nil then
 	    	word_prob = word_prob + self.vocab[self.index2word[word_index]]^self.alpha / total_count_pow	-- we add the probabilities of the previous words and the current one
 	    end
         end
@@ -181,6 +184,7 @@ function Word2Vec:sample_contexts(context,word)
 	if context ~= neg_context then
             --start=sys.clock()
 	    self.contexts[i+2] = neg_context
+	    --print("NEG:",self.index2word[neg_context])
             --print(string.format("Putting negative context in table in %.10f seconds.", sys.clock() - start))
 	    i = i + 1
 	end
@@ -194,7 +198,7 @@ end
 --------------------------------
 
 function Word2Vec:train_pair(word, contexts)
-    print("Training pair...")
+    --print("Training pair...")
     local start = sys.clock()
     local batchlabels = torch.zeros(self.batch_size,self.neg_samples+1)
     if self.gpu == 1 then
@@ -204,17 +208,19 @@ function Word2Vec:train_pair(word, contexts)
 	batchlabels[i] = self.labels
     end
     --print(word,contexts)
+    self.w2v:zeroGradParameters()
     local p = self.w2v:forward({contexts,word})						-- do forward pass through MM and sigmoid, get output 
     --print(string.format("First forward pass in %.5f seconds.", sys.clock() - start))
     --start=sys.clock()
     local loss = self.criterion:forward(p, batchlabels)						-- compare with actual labels (one-hot vector, with first element set to one)
     self.loss_toprint=self.loss_toprint+loss
+    --self.loss_toprint=loss
     --print(string.format("Loss calculated in %.5f seconds.", sys.clock() - start))
     --start=sys.clock()
     local dl_dp = self.criterion:backward(p, batchlabels)
     --print(string.format("Gradients calculated in %.10f seconds.", sys.clock() - start))
     --start=sys.clock()
-    self.w2v:zeroGradParameters()
+    --self.w2v:zeroGradParameters()
     self.w2v:backward({contexts, word}, dl_dp)
     --print(string.format("Backward pass in %.5f seconds.", sys.clock() - start))
     --start=sys.clock()
@@ -255,7 +261,7 @@ function Word2Vec:train_stream(corpus)
 		end
 	    end
 	end
-	print("Subsampled line: ",subsampled_line)
+	--print("Subsampled line: ",subsampled_line)
         --print(string.format("Subsampled line calculated in %.5f seconds.", sys.clock() - start))
 	--start=sys.clock()
 
@@ -271,7 +277,6 @@ function Word2Vec:train_stream(corpus)
 	for i,_ in ipairs(sentence) do
 		len_sentence = len_sentence + 1
 	end
-        print(len_sentence)
     	local reduced_window = torch.random(self.window) -- pick random window size
         count = 1
 	for i,word in ipairs(sentence) do
@@ -282,22 +287,29 @@ function Word2Vec:train_stream(corpus)
 	            local context = sentence[j]
 		    if context ~= nil and j ~= i then -- possible context
 			--print(context)
-			print(i,j)
+			--print(i,j)
 		        context_idx = self.word2index[context]
 			if context_idx ~= nil then -- valid context
   		                self:sample_contexts(context_idx,word_idx) -- update pos/neg contexts
-				if count > self.batch_size or (i == len_sentence and j == len_sentence - 1)
+				if count > self.batch_size
 				then
 					self:train_pair(batch_word, batch_contexts)
+					-- Original from w2v c: alpha = starting_alpha * (1 - word_count_actual / (real)(iter * train_words + 1));
+					-- Original from torch implementation: 
 					self.lr = math.max(self.min_lr, self.lr + self.decay)
+					--print(self.original_lr,c,self.epochs,self.total_count)
+					--new_lr = self.original_lr*(1-c/(self.epochs * self.total_count +1))
+					--if new_lr > self.min_lr then
+					--	self.lr=new_lr
+					--end
 					count = 1	
-					for k=1,self.batch_size do
+					for k=1,self.batch_size do			-- reset the batches
 						batch_word[k]=0.0
 						for k2=1,self.neg_samples+1 do
 							batch_contexts[k][k2]=0.0
 						end
 					end
-					print(word,self.word2index[word],context,self.word2index[context])
+					--print(word,context)
 					if self.index2word[self.word] ~= nil
 					then
 						batch_word[count]=self.word
@@ -305,7 +317,7 @@ function Word2Vec:train_stream(corpus)
 						count = count + 1
 					end
 				else
-					print(word,self.word2index[word],context,self.word2index[context])
+					--print(word,context)
 					if self.word2index[word] ~= nil
 					then
 						batch_word[count]=self.word2index[word]
@@ -314,10 +326,19 @@ function Word2Vec:train_stream(corpus)
 						--print(count)
 					end
 				end
+				-- Also cater for end of sentence
+ 				--if i == len_sentence and j == len_sentence - 1 then
+				--	print(count)
+				--	print(batch_word,batch_contexts)
+				--	self:train_pair(batch_word, batch_contexts)
+				--	self.lr = math.max(self.min_lr, self.lr + self.decay)
+				--end
+					
 			        c = c + 1
-			        if c % 100000 ==0 then
+			        if c % 10000 ==0 then
 			            print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
-				    print(string.format("Loss: %.4f",self.loss_toprint/100000))
+				    self.loss_toprint=self.loss_toprint/10000
+				    print(string.format("Loss: %.7f",self.loss_toprint))
 				    self.loss_toprint=0.0
 				    --self:print_semantic_space()
 			        end
