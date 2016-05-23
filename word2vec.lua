@@ -471,12 +471,16 @@ end
 
 function Word2Vec:print_sim_words(words, k)
     for i = 1, #words do
+        sim_words=""
     	r = self:get_sim_words(words[i], k)
 	if r ~= nil then
-   	    print("-------"..words[i].."-------")
+   	    --print("-------"..words[i].."-------")
+	    sim_words=sim_words..words[i]..": "
 	    for j = 1, k do
-	        print(string.format("%s, %.4f", r[j][1], r[j][2]))
+	        --print(string.format("%s, %.4f", r[j][1], r[j][2]))
+		sim_words=sim_words..string.format("%s, (%.4f)",r[j][1],r[j][2]).." "
 	    end
+	    print(sim_words)
 	end
     end
 end
