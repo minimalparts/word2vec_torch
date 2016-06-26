@@ -46,26 +46,19 @@ function Word2Vec:initialise_model(background)
     self.original_lr = self.lr
     if background=="none" then
         -- initialize word/context embeddings now that vocab size is known
-        self.word_vecs = nn.LookupTable(self.vocab_size, self.dim, self.gpu) -- word embeddings
-        self.context_vecs = nn.LookupTable(self.vocab_size, self.dim, self.gpu) -- context embeddings
+        self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
+        self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
     else
        self.word_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
        self.context_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
     end
     --In original code, the context vectors are set to 0
-    for i=1,self.vocab_size do
-        for j=1,self.dim do
-            self.context_vecs.weight[i][j]=0.0
-        end
-    end
-
-    for i = 1, self.word_vecs.weight:size(1) do
-	for j = 1, self.dim do
-		random=(torch.random()/(2^32)-0.5)/self.dim
-		self.word_vecs.weight[i][j]=random
-	end
-    end
-    --print(self.word_vecs.weight)
+    self.context_vecs.weight=self.context_vecs.weight*0.0
+    self.word_vecs.weight:apply(function() return (torch.random()/(2^32)-0.5)/self.dim end) 
+    
+    self.batchlabels = torch.zeros(self.batch_size,self.neg_samples+1)
+    self.batchlabels[{{},1}]:fill(1)
+    
     self.w2v = nn.Sequential()
     self.w2v:add(nn.ParallelTable())
     self.w2v.modules[1]:add(self.context_vecs)
@@ -174,22 +167,14 @@ function Word2Vec:sample_contexts(context,word)
     self.contexts[1] = context
     local i = 0
     while i < self.neg_samples do
-        --start=sys.clock()
         rand = torch.random(self.table_size)
-        --print(string.format("Getting random number in %.10f seconds.", sys.clock() - start))
         start=sys.clock()
         neg_context = self.table[rand]
-        --print(string.format("Getting negative context in %.10f seconds.", sys.clock() - start))
-        --start=sys.clock()
 	if context ~= neg_context then
-            --start=sys.clock()
 	    self.contexts[i+2] = neg_context
-	    --print("NEG:",self.index2word[neg_context])
-            --print(string.format("Putting negative context in table in %.10f seconds.", sys.clock() - start))
 	    i = i + 1
 	end
     end
-    --print(string.format("Negative sampling calculated in %.5f seconds.", sys.clock() - start))
 end
 
 
@@ -200,33 +185,21 @@ end
 function Word2Vec:train_pair(word, contexts)
     --print("Training pair...")
     local start = sys.clock()
-    local batchlabels = torch.zeros(self.batch_size,self.neg_samples+1)
+    local batchlabels = self.batchlabels
     if self.gpu == 1 then
-	    batchlabels = batchlabels:cuda()
+	    word = word:clone():cuda()
+	    contexts = contexts:clone():cuda()
+	    batchlabels = batchlabels:clone():cuda()
     end
-    for i=1,self.batch_size do
-	batchlabels[i] = self.labels
-    end
-    --print(word,contexts)
+    --print(word,contexts,batchlabels)
     self.w2v:zeroGradParameters()
     local p = self.w2v:forward({contexts,word})						-- do forward pass through MM and sigmoid, get output 
-    --print(string.format("First forward pass in %.5f seconds.", sys.clock() - start))
-    --start=sys.clock()
     local loss = self.criterion:forward(p, batchlabels)						-- compare with actual labels (one-hot vector, with first element set to one)
     self.loss_toprint=self.loss_toprint+loss
     --self.loss_toprint=loss
-    --print(string.format("Loss calculated in %.5f seconds.", sys.clock() - start))
-    --start=sys.clock()
     local dl_dp = self.criterion:backward(p, batchlabels)
-    --print(string.format("Gradients calculated in %.10f seconds.", sys.clock() - start))
-    --start=sys.clock()
-    --self.w2v:zeroGradParameters()
     self.w2v:backward({contexts, word}, dl_dp)
-    --print(string.format("Backward pass in %.5f seconds.", sys.clock() - start))
-    --start=sys.clock()
     self.w2v:updateParameters(self.lr)
-    --print(string.format("Updated parameters in %.5f seconds.", sys.clock() - start))
-    --print(string.format("Trained pair in %.2f seconds.", sys.clock() - start))
     --print(self.word_vecs.weight)
     --print(self.context_vecs.weight)
 end
@@ -241,12 +214,23 @@ end
 function Word2Vec:train_stream(corpus)
     print("Training (streaming)...")
     local start = sys.clock()
-    local c = 0
-    f = io.open(corpus, "r")
-    for line in f:lines() do
-        sentence = self:split(line)
+    local c = 0				-- word count
+    local total_c = 0			-- total word count
+
+    local BUFSIZE = 2^15    
+    local f = io.input(corpus)   -- open input file
+    while true do
+	--print("Buffering...")
+	local lines, rest = f:read(BUFSIZE, "*line")
+	if not lines then break end
+	if rest then lines = lines .. rest .. '\n' end
+	--print("Finished buffering...")
+
+	start = sys.clock()
+	sentence = self:split(lines)
+	total_c=total_c+#sentence
 	local subsampled_line=""
-        for i, word in ipairs(sentence) do
+	for i, word in ipairs(sentence) do
 	    word=word:lower()
 	    word_idx = self.word2index[word]
 	    freq=self.vocab[self.index2word[word_idx]]
@@ -262,35 +246,27 @@ function Word2Vec:train_stream(corpus)
 	    end
 	end
 	--print("Subsampled line: ",subsampled_line)
-        --print(string.format("Subsampled line calculated in %.5f seconds.", sys.clock() - start))
-	--start=sys.clock()
 
-        local batch_word = torch.zeros(self.batch_size,1)
-        local batch_contexts = torch.zeros(self.batch_size,self.neg_samples+1)
-        if self.gpu == 1 then
-	    batch_word = batch_word:clone():cuda()
-	    batch_contexts = batch_contexts:clone():cuda()
-        end
+	local batch_word = torch.zeros(self.batch_size,1)
+	local batch_contexts = torch.zeros(self.batch_size,self.neg_samples+1)
 
 	sentence = self:split(subsampled_line)
-	len_sentence=0
-	for i,_ in ipairs(sentence) do
-		len_sentence = len_sentence + 1
-	end
-    	local reduced_window = torch.random(self.window) -- pick random window size
-        count = 1
+	len_sentence=#sentence
+	local reduced_window = torch.random(self.window) -- pick random window size
+	--print(#sentence,reduced_window)
+	count = 1
 	for i,word in ipairs(sentence) do
 		--print(i,word)
 		word_idx = self.word2index[word]
 		self.word[1] = word_idx -- update current word
-                for j = i - reduced_window, i + reduced_window do -- loop through contexts
-	            local context = sentence[j]
+		for j = i - reduced_window, i + reduced_window do -- loop through contexts
+		    local context = sentence[j]
 		    if context ~= nil and j ~= i then -- possible context
 			--print(context)
 			--print(i,j)
-		        context_idx = self.word2index[context]
+			context_idx = self.word2index[context]
 			if context_idx ~= nil then -- valid context
-  		                self:sample_contexts(context_idx,word_idx) -- update pos/neg contexts
+				self:sample_contexts(context_idx,word_idx) -- update pos/neg contexts
 				if count > self.batch_size
 				then
 					self:train_pair(batch_word, batch_contexts)
@@ -303,12 +279,8 @@ function Word2Vec:train_stream(corpus)
 					--	self.lr=new_lr
 					--end
 					count = 1	
-					for k=1,self.batch_size do			-- reset the batches
-						batch_word[k]=0.0
-						for k2=1,self.neg_samples+1 do
-							batch_contexts[k][k2]=0.0
-						end
-					end
+					batch_word = torch.zeros(self.batch_size,1)			--reset the batches
+					batch_contexts = torch.zeros(self.batch_size,self.neg_samples+1)
 					--print(word,context)
 					if self.index2word[self.word] ~= nil
 					then
@@ -327,25 +299,28 @@ function Word2Vec:train_stream(corpus)
 					end
 				end
 				-- Also cater for end of sentence
- 				--if i == len_sentence and j == len_sentence - 1 then
+				--if i == len_sentence and j == len_sentence - 1 then
 				--	print(count)
 				--	print(batch_word,batch_contexts)
 				--	self:train_pair(batch_word, batch_contexts)
 				--	self.lr = math.max(self.min_lr, self.lr + self.decay)
 				--end
-					
-			        c = c + 1
-			        if c % 10000 ==0 then
-			            print(string.format("%d words trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
-				    self.loss_toprint=self.loss_toprint/10000
-				    print(string.format("Loss: %.7f",self.loss_toprint))
-				    self.loss_toprint=0.0
+						
+				c = c + 1
+				--if c % 10000 ==0 then
+				
 				    --self:print_semantic_space()
-			        end
+				--end
 			end
 		    end
-                end		
+		end		
 	end
+	print(string.format("%d word pairs trained in %.2f seconds. Learning rate: %.4f", c, sys.clock() - start, self.lr))
+	print("Total count:",total_c)
+	self.loss_toprint=self.loss_toprint/c
+	print(string.format("Loss: %.7f",self.loss_toprint))
+	self.loss_toprint=0.0
+	c=0
     end
 end
 
@@ -382,9 +357,6 @@ function Word2Vec:cuda()
     require("cunn")
     require("cutorch")
     cutorch.setDevice(1)
-    self.word = self.word:cuda()
-    self.contexts = self.contexts:cuda()
-    self.labels = self.labels:cuda()
     self.criterion:cuda()
     self.w2v:cuda()
 end
