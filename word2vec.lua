@@ -48,13 +48,13 @@ function Word2Vec:initialise_model(background)
         -- initialize word/context embeddings now that vocab size is known
         self.word_vecs = nn.LookupTable(self.vocab_size, self.dim) -- word embeddings
         self.context_vecs = nn.LookupTable(self.vocab_size, self.dim) -- context embeddings
+        --In original code, the context vectors are set to 0
+        self.context_vecs.weight=self.context_vecs.weight*0.0
+        self.word_vecs.weight:apply(function() return (torch.random()/(2^32)-0.5)/self.dim end) 
     else
        self.word_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
        self.context_vecs = backgroundSpace(self.word2index, self.dim, background) -- word embeddings from background
     end
-    --In original code, the context vectors are set to 0
-    self.context_vecs.weight=self.context_vecs.weight*0.0
-    self.word_vecs.weight:apply(function() return (torch.random()/(2^32)-0.5)/self.dim end) 
     
     self.batchlabels = torch.zeros(self.batch_size,self.neg_samples+1)
     self.batchlabels[{{},1}]:fill(1)
@@ -385,7 +385,7 @@ local dump = function(vec)
     for i=1,vec:nElement() do
         t[#t+1] = string.format('%.4f', vec[i])
     end
-    return table.concat(t, '\t')
+    return table.concat(t, ' ')
 end
 
 --------------------------
@@ -410,7 +410,7 @@ function Word2Vec:print_semantic_space()
 	vec=self.word_vecs_norm[self.word2index[word]]
 	vec:resize(vec:size(1),1)				--can only transpose vector with dim 2, so resize
 	vec=vec:t()
-	io.write(word,"\t",dump(vec),"\n")
+	io.write(word," ",dump(vec),"\n")
     end
 end
 
