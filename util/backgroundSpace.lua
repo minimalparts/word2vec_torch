@@ -19,6 +19,11 @@ function numkeys(T)
     return count
 end
 
+function file_exists(name)
+   local f=io.open(name,"r")
+   if f~=nil then io.close(f) return true else return false end
+end
+
 local backgroundSpace, parent = torch.class('backgroundSpace', 'nn.LookupTable')
 
 function backgroundSpace:__init(word2idx, embedding_size, background)
@@ -27,23 +32,28 @@ function backgroundSpace:__init(word2idx, embedding_size, background)
     self.vocab_size = numkeys(word2idx)
     self.word2idx = word2idx
     parent.__init(self, self.vocab_size, embedding_size)		--the lookup table?
-    print("loading existing space")
+    --print("loading existing space")
     self.embedding_size = embedding_size
     self.vocab_embedding_file = background..".t7"
-    w = self:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx)
-    --if file_embedding_size ~= embedding_size then
-    --    w = torch.mm(w, torch.rand(file_embedding_size, embedding_size))
-    --end
-    self.weight = w:contiguous()
-    torch.save(self.vocab_embedding_file, self.weight)
-    print("loaded space")
+    if file_exists(self.vocab_embedding_file)
+    then
+	self.weight = torch.load(self.vocab_embedding_file)
+    else
+        w = self:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx)
+        --if file_embedding_size ~= embedding_size then
+        --    w = torch.mm(w, torch.rand(file_embedding_size, embedding_size))
+        --end
+        self.weight = w:contiguous()
+        torch.save(self.vocab_embedding_file, self.weight)
+    end
+    --print("loaded space")
 end
 
 function backgroundSpace:parseEmbeddingFile(embedding_file, file_embedding_size, word2idx, gpu)
     local word_lower2idx = {}
     local loaded = {}
     local weight = torch.Tensor()
-    print(self.vocab_size,file_embedding_size)
+    --print(self.vocab_size,file_embedding_size)
     if gpu == 1 then
         weight = torch.CudaTensor(self.vocab_size, file_embedding_size)
     else
