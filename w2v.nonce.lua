@@ -254,55 +254,56 @@ function Word2Vec:train_stream(corpus)
 	--local reduced_window = torch.random(self.window) -- pick random window size
 	local reduced_window = self.window -- If only seeing the sentence once, keep whole window
 	--print(#sentence,reduced_window)
+	--subsampled_line = line
 	count = 1
 	print("SUB LINE:",subsampled_line)
 	sentence = self:split(subsampled_line)
 	for i,word in ipairs(sentence) do
 		--print(word)
 		--print(self.word2index[word])
-		--if word == "___" then				-- only train the gap
-		word_idx = self.word2index[word]
-		if word_idx ~= nil then
-			self.word[1] = word_idx -- update current word
-			for j = i - reduced_window, i + reduced_window do -- loop through contexts
-			    local context = sentence[j]
-			    if context ~= nil and j ~= i then -- possible context
-				--print(context)
-				--print(i,j)
-				context_idx = self.word2index[context]
-				if context_idx ~= nil then -- valid context
-					self:sample_contexts(context_idx,word_idx) -- update pos/neg contexts
-					if count > self.batch_size
-					then
-						self.context_vecs=self.original_context_vecs			-- reset contexts because we don't want them to change.
-						self:train_pair(batch_word, batch_contexts)
-						self.lr = math.max(self.min_lr, self.lr + self.decay)
-						count = 1	
-						batch_word = torch.zeros(self.batch_size,1)			--reset the batches
-						batch_contexts = torch.zeros(self.batch_size,self.neg_samples+1)
-						--print(word,context)
-						if self.index2word[self.word] ~= nil
+		if word == "___" then				-- only train the gap
+			word_idx = self.word2index[word]
+			if word_idx ~= nil then
+				self.word[1] = word_idx -- update current word
+				for j = i - reduced_window, i + reduced_window do -- loop through contexts
+				    local context = sentence[j]
+				    if context ~= nil and j ~= i then -- possible context
+					--print(context)
+					--print(i,j)
+					context_idx = self.word2index[context]
+					if context_idx ~= nil then -- valid context
+						self:sample_contexts(context_idx,word_idx) -- update pos/neg contexts
+						if count > self.batch_size
 						then
-							batch_word[count]=self.word
-							batch_contexts[count]=self.contexts
-							count = count + 1
+							self.context_vecs=self.original_context_vecs			-- reset contexts because we don't want them to change.
+							self:train_pair(batch_word, batch_contexts)
+							self.lr = math.max(self.min_lr, self.lr + self.decay)
+							count = 1	
+							batch_word = torch.zeros(self.batch_size,1)			--reset the batches
+							batch_contexts = torch.zeros(self.batch_size,self.neg_samples+1)
+							--print(word,context)
+							if self.index2word[self.word] ~= nil
+							then
+								batch_word[count]=self.word
+								batch_contexts[count]=self.contexts
+								count = count + 1
+							end
+						else
+							--print(word,context)
+							if self.word2index[word] ~= nil
+							then
+								batch_word[count]=self.word2index[word]
+								batch_contexts[count]=self.contexts
+								count = count + 1
+								--print(count)
+							end
 						end
-					else
-						--print(word,context)
-						if self.word2index[word] ~= nil
-						then
-							batch_word[count]=self.word2index[word]
-							batch_contexts[count]=self.contexts
-							count = count + 1
-							--print(count)
-						end
+						--WARNING: if using batch_size > 1, the end of sentence might not be read.
+								
+					c = c + 1
 					end
-					--WARNING: if using batch_size > 1, the end of sentence might not be read.
-							
-				c = c + 1
 				end
-			end
-		    --end
+		    end
 		end
 	    end
 	end
@@ -454,7 +455,7 @@ function Word2Vec:get_rank_sim(w1, w2)
     local sim = torch.mv(self.word_vecs_norm, w1)
     sim, idx = torch.sort(-sim)
     r = -1
-    for i = 1, 1000 do
+    for i = 1, 10000 do
         if w2 == self.index2word[idx[i]] then
 	    r = i
 	    break
@@ -467,6 +468,8 @@ end
 -- Return the similarity of two words
 ------------------------------------------------------------------------------
 function Word2Vec:cosine(w1, w2)
+    --print(self.word_vecs.weight[self.word2index[w1]][{{1,10}}])
+    --print(self.word_vecs.weight[self.word2index[w2]][{{1,10}}])
     self.word_vecs_norm = self:normalize(self.word_vecs.weight:double())
     if type(w1) == "string" then
         if self.word2index[w1] == nil or self.word2index[w2] == nil then
